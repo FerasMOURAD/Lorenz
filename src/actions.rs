@@ -213,8 +213,22 @@ fn floater() -> Option<PathBuf> {
         .into_iter()
         .find_map(executable)
 }
-fn pdf_editor() -> Option<PathBuf> {
-    executable("libreoffice").or_else(|| executable("soffice"))
+fn pdf_editor() -> Option<(PathBuf, Vec<&'static str>)> {
+    if let Some(p) = executable("onlyoffice-desktopeditors") {
+        return Some((p, Vec::new()));
+    }
+    if let Some(fp) = executable("flatpak") {
+        let user_app = env::var_os("HOME")
+            .map(PathBuf::from)
+            .is_some_and(|h| h.join(".local/share/flatpak/app/org.onlyoffice.desktopeditors").exists());
+        let sys_app = Path::new("/var/lib/flatpak/app/org.onlyoffice.desktopeditors").exists();
+        if user_app || sys_app {
+            return Some((fp, vec!["run", "org.onlyoffice.desktopeditors"]));
+        }
+    }
+    executable("libreoffice")
+        .or_else(|| executable("soffice"))
+        .map(|p| (p, vec!["--draw"]))
 }
 
 pub fn available(paths: &[PathBuf]) -> Vec<Action> {
@@ -413,15 +427,15 @@ pub fn run(id: &str, paths: &[PathBuf], destination: Option<&Path>) -> Result<Ve
                 .spawn()?;
         }
         "edit-pdf" => {
-            let editor = pdf_editor().context("LibreOffice is not installed")?;
+            let (editor, prefix) = pdf_editor().context("No PDF editor is installed")?;
             Command::new(editor)
-                .arg("--draw")
+                .args(prefix)
                 .args(&paths)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
-                .context("Cannot start LibreOffice Draw")?;
+                .context("Cannot start PDF editor")?;
         }
         "reveal" => reveal(&paths)?,
         "copy-to" | "move-to" => {
