@@ -28,6 +28,17 @@ suffix = "compressed"
 args = ["{coded_input}", "-strip", "-define", "png:compression-level=9", "-define", "png:compression-filter=5", "{output}"]
 
 [[tool]]
+id = "remove-bg"
+label = "Remove BG"
+category = "Images"
+glyph = "image"
+inputs = ["png", "jpg", "jpeg", "webp", "avif", "tif", "tiff", "bmp"]
+backend = "rembg"
+output = "png"
+suffix = "nobg"
+args = ["i", "{input}", "{output}"]
+
+[[tool]]
 id = "resize-half"
 label = "Resize 50%"
 category = "Images"

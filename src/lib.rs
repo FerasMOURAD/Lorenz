@@ -88,6 +88,18 @@ pub fn engine_command(name: &str) -> Option<(PathBuf, Vec<String>)> {
 /// ImageMagick 6 provides only `convert`, Windows Ghostscript is `gswin64c`,
 /// and the `tar` included with Windows 10 and later is bsdtar.
 pub fn engine(name: &str) -> Option<PathBuf> {
+    if name == "rembg" {
+        if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+            let direct = home.join(".local/share/lorenz/rembg/bin/rembg");
+            if direct.is_file() {
+                return Some(direct);
+            }
+            let local_bin = home.join(".local/bin/rembg");
+            if local_bin.is_file() {
+                return Some(local_bin);
+            }
+        }
+    }
     let aliases: &[&str] = match name {
         "magick" if cfg!(unix) => &["magick", "convert"],
         "gs" if cfg!(windows) => &["gswin64c", "gswin32c", "gs"],
@@ -319,6 +331,7 @@ pub fn doctor() -> Doctor {
             "gs",
             "bsdtar",
             "xournalpp",
+            "rembg",
         ]
         .into_iter()
         .map(|name| {
