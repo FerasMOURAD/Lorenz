@@ -1,6 +1,6 @@
 //! File actions for the third wheel. They work on files and folders and never
 //! replace an existing destination.
-use crate::{executable, file_url, publish_as, publish_dir};
+use crate::{executable, extension, file_url, publish_as, publish_dir};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use std::{
@@ -20,7 +20,13 @@ pub struct Action {
     /// The desktop must ask for a destination folder first.
     pub needs_destination: bool,
 }
-const ALL: [Action; 8] = [
+const ALL: [Action; 9] = [
+    Action {
+        id: "edit-pdf",
+        label: "Edit PDF",
+        glyph: "pdf",
+        needs_destination: false,
+    },
     Action {
         id: "share",
         label: "Share",
@@ -207,14 +213,19 @@ fn floater() -> Option<PathBuf> {
         .into_iter()
         .find_map(executable)
 }
+fn pdf_editor() -> Option<PathBuf> {
+    executable("libreoffice").or_else(|| executable("soffice"))
+}
 
 pub fn available(paths: &[PathBuf]) -> Vec<Action> {
     if paths.is_empty() || !paths.iter().all(|p| p.exists()) {
         return Vec::new();
     }
     let files = paths.iter().all(|p| p.is_file());
+    let all_pdfs = files && paths.iter().all(|p| extension(p) == "pdf");
     ALL.iter()
         .filter(|a| match a.id {
+            "edit-pdf" => all_pdfs && pdf_editor().is_some(),
             "share" => files && !cfg!(windows) && executable("kdeconnect-handler").is_some(),
             "float" => floater().is_some(),
             "copy" | "path" => cfg!(windows) || clipboard("text/plain").is_some(),
@@ -401,6 +412,17 @@ pub fn run(id: &str, paths: &[PathBuf], destination: Option<&Path>) -> Result<Ve
                 .args(&paths)
                 .spawn()?;
         }
+        "edit-pdf" => {
+            let editor = pdf_editor().context("LibreOffice is not installed")?;
+            Command::new(editor)
+                .arg("--draw")
+                .args(&paths)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("Cannot start LibreOffice Draw")?;
+        }
         "reveal" => reveal(&paths)?,
         "copy-to" | "move-to" => {
             let destination = crate::canonical(destination.context("Choose a destination folder")?)
@@ -459,5 +481,15 @@ mod tests {
             .map(|a| a.id)
             .collect();
         assert!(ids.contains(&"copy-to") && ids.contains(&"reveal") && !ids.contains(&"share"));
+        assert!(!ids.contains(&"edit-pdf"));
+
+        let pdf = d.path().join("sample.pdf");
+        let txt = d.path().join("sample.txt");
+        fs::write(&pdf, b"%PDF-1.4").unwrap();
+        fs::write(&txt, b"hello").unwrap();
+        let pdf_ids: Vec<_> = available(&[pdf]).iter().map(|a| a.id).collect();
+        let txt_ids: Vec<_> = available(&[txt]).iter().map(|a| a.id).collect();
+        assert_eq!(pdf_ids.contains(&"edit-pdf"), pdf_editor().is_some());
+        assert!(!txt_ids.contains(&"edit-pdf"));
     }
 }
