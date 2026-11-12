@@ -213,18 +213,26 @@ fn floater() -> Option<PathBuf> {
         .into_iter()
         .find_map(executable)
 }
+fn flatpak_installed(app_id: &str) -> Option<PathBuf> {
+    let fp = executable("flatpak")?;
+    let user_app = env::var_os("HOME")
+        .map(PathBuf::from)
+        .is_some_and(|h| h.join(".local/share/flatpak/app").join(app_id).exists());
+    let sys_app = Path::new("/var/lib/flatpak/app").join(app_id).exists();
+    (user_app || sys_app).then_some(fp)
+}
 fn pdf_editor() -> Option<(PathBuf, Vec<&'static str>)> {
+    if let Some(p) = executable("xournalpp") {
+        return Some((p, Vec::new()));
+    }
+    if let Some(fp) = flatpak_installed("com.github.xournalpp.xournalpp") {
+        return Some((fp, vec!["run", "com.github.xournalpp.xournalpp"]));
+    }
     if let Some(p) = executable("onlyoffice-desktopeditors") {
         return Some((p, Vec::new()));
     }
-    if let Some(fp) = executable("flatpak") {
-        let user_app = env::var_os("HOME")
-            .map(PathBuf::from)
-            .is_some_and(|h| h.join(".local/share/flatpak/app/org.onlyoffice.desktopeditors").exists());
-        let sys_app = Path::new("/var/lib/flatpak/app/org.onlyoffice.desktopeditors").exists();
-        if user_app || sys_app {
-            return Some((fp, vec!["run", "org.onlyoffice.desktopeditors"]));
-        }
+    if let Some(fp) = flatpak_installed("org.onlyoffice.desktopeditors") {
+        return Some((fp, vec!["run", "org.onlyoffice.desktopeditors"]));
     }
     executable("libreoffice")
         .or_else(|| executable("soffice"))
@@ -428,14 +436,16 @@ pub fn run(id: &str, paths: &[PathBuf], destination: Option<&Path>) -> Result<Ve
         }
         "edit-pdf" => {
             let (editor, prefix) = pdf_editor().context("No PDF editor is installed")?;
-            Command::new(editor)
-                .args(prefix)
-                .args(&paths)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .context("Cannot start PDF editor")?;
+            for path in &paths {
+                Command::new(&editor)
+                    .args(&prefix)
+                    .arg(path)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .context("Cannot start PDF editor")?;
+            }
         }
         "reveal" => reveal(&paths)?,
         "copy-to" | "move-to" => {
