@@ -60,6 +60,30 @@ pub fn executable(name: &str) -> Option<PathBuf> {
             }
         })
 }
+pub fn flatpak_installed(app_id: &str) -> Option<PathBuf> {
+    let fp = executable("flatpak")?;
+    let user_app = env::var_os("HOME")
+        .map(PathBuf::from)
+        .is_some_and(|h| h.join(".local/share/flatpak/app").join(app_id).exists());
+    let sys_app = Path::new("/var/lib/flatpak/app").join(app_id).exists();
+    (user_app || sys_app).then_some(fp)
+}
+pub fn engine_command(name: &str) -> Option<(PathBuf, Vec<String>)> {
+    if let Some(path) = engine(name) {
+        return Some((path, Vec::new()));
+    }
+    if name == "xournalpp" {
+        if let Some(fp) = flatpak_installed("com.github.xournalpp.xournalpp") {
+            return Some((
+                fp,
+                ["run", "--command=xournalpp", "com.github.xournalpp.xournalpp"]
+                    .map(String::from)
+                    .to_vec(),
+            ));
+        }
+    }
+    None
+}
 /// Resolves a registry engine, accepting the names distributions really ship:
 /// ImageMagick 6 provides only `convert`, Windows Ghostscript is `gswin64c`,
 /// and the `tar` included with Windows 10 and later is bsdtar.
@@ -184,7 +208,7 @@ pub fn formats(input: &Path) -> Vec<Format> {
         .into_iter()
         .filter(|r| r.inputs.contains(&ext))
         .flat_map(|r| {
-            let available = engine(&r.backend).is_some();
+            let available = engine_command(&r.backend).is_some();
             r.outputs
                 .into_iter()
                 .filter(|o| o != &ext)
@@ -218,7 +242,7 @@ pub fn menu(kind: &str, paths: &[PathBuf]) -> Result<Vec<MenuItem>> {
                 if path.is_file() {
                     let ext = extension(path);
                     for rule in registry().into_iter().filter(|r| r.inputs.contains(&ext)) {
-                        if engine(&rule.backend).is_none() {
+                        if engine_command(&rule.backend).is_none() {
                             continue;
                         }
                         for target in rule.outputs.iter().filter(|o| **o != ext) {
@@ -294,10 +318,11 @@ pub fn doctor() -> Doctor {
             "qpdf",
             "gs",
             "bsdtar",
+            "xournalpp",
         ]
         .into_iter()
         .map(|name| {
-            let path = engine(name);
+            let path = engine_command(name).map(|(p, _)| p);
             Backend {
                 name: name.into(),
                 available: path.is_some(),
@@ -709,7 +734,7 @@ pub fn convert(
         extension(&input) != target,
         "The file is already in this format"
     );
-    let backend = engine(&rule.backend)
+    let (backend, prefix) = engine_command(&rule.backend)
         .with_context(|| format!("Missing engine: {}. Run lorenz doctor.", rule.backend))?;
     let directory = output_directory(&input, directory)?;
     let workspace = tempfile::Builder::new()
@@ -727,9 +752,11 @@ pub fn convert(
     };
     for step in [&rule.args, &rule.then] {
         if !step.is_empty() {
+            let mut args = prefix.clone();
+            args.extend(expand(step, &values));
             run_backend(
                 &backend,
-                &expand(step, &values),
+                &args,
                 workspace.path(),
                 cancel,
                 timeout,
@@ -859,6 +886,11 @@ mod tests {
             formats(Path::new("photo.PNG"))
                 .iter()
                 .any(|f| f.target == "webp")
+        );
+        assert!(
+            formats(Path::new("notes.xopp"))
+                .iter()
+                .any(|f| f.target == "pdf")
         );
         assert!(formats(Path::new("data.unknown")).is_empty());
         assert!(

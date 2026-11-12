@@ -105,6 +105,14 @@ outputs = ["srt", "vtt"]
 backend = "ffmpeg"
 args = ["-hide_banner", "-loglevel", "error", "-nostdin", "-n", "-protocol_whitelist", "file,pipe", "-i", "{input}", "{output}"]
 
+[[conversion]]
+category = "Documents"
+glyph = "pdf"
+inputs = ["xopp"]
+outputs = ["pdf"]
+backend = "xournalpp"
+args = ["-p", "{output}", "{input}"]
+
 # Archive entries are streamed into the new archive; nothing is extracted.
 [[conversion]]
 category = "Archives"
